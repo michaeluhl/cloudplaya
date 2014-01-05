@@ -46,6 +46,22 @@ class Authenticate(Command):
             sys.stderr.write('Unable to write authentication data: %s' % e)
             sys.exit(1)
 
+class Authorize(Command):
+    """Authorizes this device with Amazon Cloud Player."""
+    def add_options(self, parser):
+        parser.add_option('--devname', default=None,
+                          help='a user friendly name for this device')
+
+    def run(self):
+        if not self.client.authorized:
+            if self.client.authorize(self.options.devname):
+                print 'Device authorized successfully.'
+            else:
+                sys.stderr.write('Device authorization failed.\n')
+                sys.exit(1)
+        else:
+            sys.stderr.write('Device already authorized.')
+            sys.exit(1)
 
 class DownloadAll(Command):
     """Downloads all songs, all albums, all artists."""
@@ -319,6 +335,7 @@ class GetStreamURLs(Command):
 
 COMMANDS = {
     'authenticate': Authenticate(),
+    'authorize':Authorize(),
     'download-album': DownloadAlbum(),
     'download-all': DownloadAll(),
     'get-albums': GetAlbums(),

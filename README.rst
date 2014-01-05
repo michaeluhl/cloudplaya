@@ -17,9 +17,10 @@ To install cloudplaya, just run::
 Authenticating
 --------------
 
-You will need to first authenticate with Amazon Cloud Player. This will store
-.cloudplayarc file in your home directory containing some session information.
-Note that it's possible you may have to repeat this on occasion.
+You will need to first authenticate with Amazon Cloud Player. This will store a
+.cloudplayasession file and a .cloudplayacookies file in your home directory
+containing some session information. Note that it's possible you may have to
+repeat this on occasion. Also, note that if you delete the .cloudplayacookies
 
 To authenticate, run::
 
@@ -28,8 +29,27 @@ To authenticate, run::
 Replace ``<email_address>`` and ``<password>`` with your Amazon account
 e-mail and password above.
 
-You're then ready to use cloudplaya!
+You're then ready to authorize cloudplaya.
 
+Authorizing
+-----------
+
+In addition to authenticating, you also need to add cloudplaya as an authorized
+device on your Cloud Player account.
+
+To authorize, run::
+
+    $ cloudplaya authorize --devname <device_name>
+
+Replace ``<device_name>`` with the name that you would like cloudplaya to
+appear as in Amazon's authorized device list.
+
+Note that if you delete the .cloudplayacookies file, you will loose the Amazon
+cookie that estabilishes the uniqe device id for cloudplaya, and subsequent
+reauthentication of cloudplaya will result in the assignment of a new device
+id, using up another of your ten authorized device slots.
+
+You're then ready to use cloudplaya!
 
 Commands
 --------

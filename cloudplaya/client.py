@@ -5,6 +5,7 @@ import os
 import math
 import random
 import re
+import time
 
 import mechanize
 import requests
@@ -19,11 +20,17 @@ class RequestError(Exception):
         super(Exception, self).__init__(msg)
         self.code = code
 
+class DeviceNotAuthorizedError(Exception):
+    def __init__(self, msg):
+        super(Exception, self).__init__(msg)
 
 class Client(object):
     AUTH_URL = 'https://www.amazon.com/ap/signin?openid.assoc_handle=usflex&openid.claimed_id=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.identity=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.mode=checkid_setup&openid.ns=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0&openid.return_to=https%3A%2F%2Fwww.amazon.com%2Fgp%2Fdmusic%2Fmp3%2Fplayer%3Fie%3DUTF8%26requestedView%3Dsongs'
     PLAYER_URL = 'https://www.amazon.com/gp/dmusic/mp3/player'
-    API_URL = 'https://www.amazon.com/cirrus/'
+    API_URL = {
+        'V1' : 'https://www.amazon.com/cirrus/',
+        'V2' : 'https://www.amazon.com/cirrus/2011-06-01/'
+        }
 
     APPCONFIG_RE = re.compile('\s*amznMusic.appConfig\s*=\s*({.*});$')
 
@@ -53,8 +60,9 @@ class Client(object):
               'ref_=gno_yam_cldplyr&'
     ORIGIN = 'https://www.amazon.com'
 
-    def __init__(self, session_file=None):
+    def __init__(self, session_file=None, cookie_file=None):
         self.session_file = session_file
+        self.cookie_file = cookie_file
         self.customer_id = None
         self.csrf_rnd = None
         self.csrf_token = None
@@ -64,6 +72,7 @@ class Client(object):
         self.device_type = None
         self.cookies = None
         self.authenticated = False
+        self.authorized = False
 
         requests.adapters.DEFAULT_RETRIES = 5
 
@@ -78,13 +87,16 @@ class Client(object):
                 homepath = os.getcwd()
 
             self.session_file = os.path.join(homepath, '.cloudplayasession')
+            self.cookie_file = os.path.join(homepath, '.cloudplayacookies')
 
         self._load_session()
 
+        if self.authenticated:
+            self.authorized = self.check_device_authorization()
+
     def authenticate(self, username, password):
         browser = mechanize.Browser(factory=mechanize.RobustFactory())
-        cookiejar = cookielib.LWPCookieJar()
-        browser.set_cookiejar(cookiejar)
+        browser.set_cookiejar(self.cookies)
 
         browser.set_handle_equiv(True)
         browser.set_handle_redirect(True)
@@ -149,8 +161,7 @@ class Client(object):
 
                 break
 
-        auth_vars['cookies'] = '; '.join(['%s=%s' % (cookie.name, cookie.value)
-                                          for cookie in cookiejar])
+        self.cookies.save()
 
         f = open(self.session_file, 'w')
         f.write(json.dumps(auth_vars))
@@ -159,6 +170,50 @@ class Client(object):
         self._load_session()
 
         return True
+
+    def authorize(self, device_name):
+        if not self.check_device_authorization():
+            avail_result = self.get_device_authorization_availability()
+            if avail_result['deviceAuthorizationAvailability'] == u'AVAILABLE':
+                auth_result = self.authorize_device(device_name)
+                if self.check_device_authorization():
+                    return True
+        return False
+
+    def get_device_authorizations_list(self):
+        result = self._get(operation='listDeviceAuthorizations',data={},version='V2')
+        auth_result = self._get_payload_data(result, [
+            'listDeviceAuthorizationsResponse',
+            'listDeviceAuthorizationsResult',
+            ])
+        return auth_result
+
+    def get_device_authorization_availability(self):
+        result = self._get( operation='getDeviceAuthorizationAvailability',
+                            data={'deviceId':self.device_id,'deviceType':self.device_type},
+                            version='V2')
+        avail_result = self._get_payload_data(result, [
+            'getDeviceAuthorizationAvailabilityResponse',
+            'getDeviceAuthorizationAvailabilityResult',
+            ])
+        return avail_result
+
+    def authorize_device(self,device_name):
+        result = self._get( operation='authorizeDevice',
+                            data={'deviceName':device_name},
+                            version='V2')
+        return result
+
+    def check_device_authorization(self, auth_result=None):
+        if not auth_result:
+            auth_result = self.get_device_authorizations_list()
+        try:
+            for dev_auth in auth_result['deviceAuthorizations']:
+                if dev_auth['deviceId'] == self.device_id and dev_auth['deviceType'] == self.device_type and dev_auth['authorizationState'] == "ACTIVE":
+                    return True
+        except KeyError, e:
+            pass
+        return False
 
     def get_track_list(self, album):
         data = {
@@ -194,12 +249,15 @@ class Client(object):
         return [Song(self, item) for item in items]
 
     def get_song_stream_urls(self, song_ids):
+        if not self.authorized:
+            raise DeviceNotAuthorizedError("Device must be authorized before call to get_song_stream_urls()")
+
         data = {}
 
         for i, song_id in enumerate(song_ids):
             data['trackIdList.member.%d' % (i + 1)] = song_id
 
-        result = self._get('getStreamUrls', data)
+        result = self._get('getStreamUrls', data,'V2')
         items = self._get_payload_data(result, [
             'getStreamUrlsResponse',
             'getStreamUrlsResult',
@@ -298,7 +356,7 @@ class Client(object):
             if not next_results_token:
                 return
 
-    def _get(self, operation, data):
+    def _get(self, operation, data, version='V1'):
         headers = {
             'x-amzn-RequestId': self._make_request_id(),
             'csrf-rnd': self.csrf_rnd,
@@ -308,7 +366,6 @@ class Client(object):
             'User-Agent': self.USER_AGENT,
             'Referer': self.REFERER,
             'Origin': self.ORIGIN,
-            'Cookie': self.cookies,
             'Host': 'www.amazon.com',
             'Accept-Charset': 'ISO-8859-1,utf-8;q=0.7,*;q=0.3',
         }
@@ -320,12 +377,20 @@ class Client(object):
             'customerInfo.deviceId': self.device_id,
             'customerInfo.deviceType': self.device_type,
         })
+        
+        #Version 2.0.1 of requests claims that you can supply a CookieJar object
+        #for the the cookies parameter of requests.request(), however, in version
+        #2.0.1 it has code in Session.request() (which is what is called by
+        #requests.request()) that treats the cookies parameter as a dict and will
+        #fail if a CookieJar (lacking __getitem__()) is supplied...
+        #so, unpack the CookieJar to a dict for now...
+        cookies = {cookie.name: cookie.value for cookie in self.cookies}
 
         # do a few retries.
         r = None
         for x in xrange(5):
             try:
-                r = requests.post(self.API_URL, data=data, headers=headers, timeout=2, verify=False)
+                r = requests.post(self.API_URL[version], data=data, headers=headers, cookies=cookies, timeout=2, verify=False)
                 if r: break
             except requests.exceptions.SSLError, e:
                 logging.error("SSL error. Feh. %s" % e)
@@ -346,6 +411,13 @@ class Client(object):
 
     def _load_session(self):
         self.authenticated = False
+        
+        if not self.cookies:
+            self.cookies = cookielib.LWPCookieJar(filename=self.cookie_file)
+        try:
+            self.cookies.load()
+        except IOError, e:
+            logging.warning("Unable to load prior cookies.  Cookie file may not exist: %s" % e)
 
         if not os.path.exists(self.session_file):
             return
@@ -361,7 +433,6 @@ class Client(object):
             self.csrf_ts = session['csrf_ts']
             self.device_id = session['device_id']
             self.device_type = session['device_type']
-            self.cookies = session['cookies']
         except KeyError, e:
             logging.error("Unable to locate key %s in session file." % e)
             return
