@@ -20,7 +20,7 @@ Authenticating
 You will need to first authenticate with Amazon Cloud Player. This will store a
 .cloudplayasession file and a .cloudplayacookies file in your home directory
 containing some session information. Note that it's possible you may have to
-repeat this on occasion. Also, note that if you delete the .cloudplayacookies
+repeat this on occasion.
 
 To authenticate, run::
 
@@ -44,7 +44,7 @@ To authorize, run::
 Replace ``<device_name>`` with the name that you would like cloudplaya to
 appear as in Amazon's authorized device list.
 
-Note that if you delete the .cloudplayacookies file, you will loose the Amazon
+Note that if you delete the .cloudplayacookies file, you will lose the Amazon
 cookie that estabilishes the uniqe device id for cloudplaya, and subsequent
 reauthentication of cloudplaya will result in the assignment of a new device
 id, using up another of your ten authorized device slots.
